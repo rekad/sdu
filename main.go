@@ -5,8 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	// "os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -33,23 +33,44 @@ func main() {
 		defer timeExec()()
 	}
 
+	// Concurrent directory traversal sends results through the sizes channel
+	// The WaitGroup counts sub-goroutines and signals to main goroutine when traversal has finished
+	sizes := make(chan int64)
+	var wg sync.WaitGroup
+
+	// Launch goroutine to traverse each directory
 	for _, dir := range targetDirs {
-		var totalSize int64
-		totalSize += dirSize(dir)
-		fmt.Printf("%s: %s\n", dir, formatFileSize(totalSize))
+		wg.Add(1)
+		go dirSize(dir, &wg, sizes)
 	}
+
+	// When all directory sizes have been computed we can finish accumulating
+	go func() {
+		wg.Wait()
+		close(sizes)
+	}()
+
+	// Sum up sizes sent over the channel from traversing goroutines
+	var totalSize int64
+	for s := range sizes {
+		totalSize += s
+		// fmt.Printf("%s: %s\n", dir, formatFileSize(totalSize))
+	}
+	fmt.Printf("Total size: %s\n", formatFileSize(totalSize))
 }
 
 // dirSize calculates the size of a directory recursively
-func dirSize(dirName string) (totalSize int64) {
+func dirSize(dirName string, wg *sync.WaitGroup, sizes chan<- int64) {
+	defer wg.Done()
 	files, err := ioutil.ReadDir(dirName)
 	if err != nil {
 		fmt.Println("error reading", err)
 	}
 	for _, file := range files {
-		totalSize += file.Size()
+		sizes <- file.Size()
 		if file.IsDir() {
-			totalSize += dirSize(filepath.Join(dirName, file.Name()))
+			wg.Add(1)
+			go dirSize(filepath.Join(dirName, file.Name()), wg, sizes)
 		}
 	}
 	return
