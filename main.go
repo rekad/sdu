@@ -20,7 +20,8 @@ const (
 )
 
 func main() {
-	// Parse command line flags and arguments
+	// Multiple folders can be passed as the arguments.
+	// Default argument is the current folder
 	flag.Parse()
 	targetDirs := flag.Args()
 	if len(targetDirs) == 0 {
@@ -39,6 +40,7 @@ func main() {
 	}
 }
 
+// dirSize calculates the size of a directory recursively
 func dirSize(dirName string) (totalSize int64) {
 	files, err := ioutil.ReadDir(dirName)
 	if err != nil {
