@@ -10,14 +10,17 @@ import (
 	"time"
 )
 
-var timed = flag.Bool("t", false, "Report execution time")
-
 // File size units
 const (
 	kB = 1e3
 	MB = 1e6
 	GB = 1e9
 )
+
+const NUM_GOROUTINES = 20
+
+// Flags
+var timed = flag.Bool("t", false, "Report execution time")
 
 func main() {
 	// Multiple folders can be passed as the arguments.
@@ -34,8 +37,8 @@ func main() {
 	}
 
 	// Concurrent directory traversal sends results through the sizes channel
-	// The WaitGroup counts sub-goroutines and signals to main goroutine when traversal has finished
 	sizes := make(chan int64)
+	// The WaitGroup counts traversing sub-goroutines
 	var wg sync.WaitGroup
 
 	// Launch goroutine to traverse each directory
@@ -59,8 +62,13 @@ func main() {
 	fmt.Printf("Total size: %s\n", formatFileSize(totalSize))
 }
 
+// Limit number of concurrent goroutines
+var n = make(chan struct{}, NUM_GOROUTINES)
+
 // dirSize calculates the size of a directory recursively
 func dirSize(dirName string, wg *sync.WaitGroup, sizes chan<- int64) {
+	n <- struct{}{}
+	defer func() { <-n }()
 	defer wg.Done()
 	files, err := ioutil.ReadDir(dirName)
 	if err != nil {
