@@ -21,14 +21,18 @@ const (
 // Zero size struct for signal channels
 type nop struct{}
 
-// Limit number of concurrent goroutines
-var n = make(chan nop, 20)
+// Limit number of open files
+var n = make(chan nop, 30)
 
 // Cancellation channel
 var abort = make(chan nop)
 
+// Timer channel
+var timer <-chan time.Time
+
 // Flags
 var timed = flag.Bool("t", false, "Report execution time")
+var verbose = flag.Bool("v", false, "Print intermediary result")
 
 func main() {
 	// Multiple folders can be passed as the arguments.
@@ -39,9 +43,26 @@ func main() {
 		targetDirs = append(targetDirs, ".")
 	}
 
+	// Sum up sizes sent over the channel from traversing goroutines
+	var totalSize int64
+
 	// If the -t command flag is set report the total execution time
 	if *timed {
 		defer timeExec()()
+	}
+	// If -v command flag is set, start timer
+	if *verbose {
+		timer = time.Tick(time.Second)
+		go func() {
+			for {
+				select {
+				case <-timer:
+					fmt.Printf("Total size: %s\n", formatFileSize(totalSize))
+				case <-abort:
+					return
+				}
+			}
+		}()
 	}
 
 	// Concurrent directory traversal sends results through the sizes channel
@@ -64,8 +85,6 @@ func main() {
 	// Check if user has canceled
 	go pollAbort()
 
-	// Sum up sizes sent over the channel from traversing goroutines
-	var totalSize int64
 loop:
 	for {
 		select {
