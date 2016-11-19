@@ -76,7 +76,11 @@ loop:
 			totalSize += s
 		case <-abort:
 			fmt.Println("Canceled.")
-			break loop
+			fmt.Printf("Total size up to now: %s\n", formatFileSize(totalSize))
+			// Make sure all goroutines have finished and sizes is closed
+			for range sizes {
+			}
+			return
 		}
 	}
 	fmt.Printf("Total size: %s\n", formatFileSize(totalSize))
@@ -84,26 +88,44 @@ loop:
 
 // dirSize calculates the size of a directory recursively
 func dirSize(dirName string, wg *sync.WaitGroup, sizes chan<- int64) {
-	n <- nop{}
-	defer func() { <-n }()
 	defer wg.Done()
-	files, err := ioutil.ReadDir(dirName)
-	if err != nil {
-		fmt.Println("error reading", err)
+	if cancelled() {
+		return
 	}
-	for _, file := range files {
+	for _, file := range readDir(dirName) {
+		if cancelled() {
+			return
+		}
 		sizes <- file.Size()
 		if file.IsDir() {
 			wg.Add(1)
 			go dirSize(filepath.Join(dirName, file.Name()), wg, sizes)
 		}
 	}
-	return
 }
 
+// pollAbort waits for user input to cancel execution
 func pollAbort() {
 	os.Stdin.Read(make([]byte, 1))
 	close(abort)
+}
+
+// readDir returns file infos for a given dictionary
+// Writing to the n channel guarantees that not more than
+// cap(n) directories are read concurrently
+func readDir(dir string) []os.FileInfo {
+	select {
+	case n <- nop{}:
+	case <-abort:
+		return nil
+	}
+	defer func() { <-n }()
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		fmt.Printf("Error reading directory: %v\n", err)
+		return nil
+	}
+	return files
 }
 
 // Helper to check if user has cancelled
