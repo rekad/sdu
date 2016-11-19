@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -17,7 +18,14 @@ const (
 	GB = 1e9
 )
 
-const NUM_GOROUTINES = 20
+// Zero size struct for signal channels
+type nop struct{}
+
+// Limit number of concurrent goroutines
+var n = make(chan nop, 20)
+
+// Cancellation channel
+var abort = make(chan nop)
 
 // Flags
 var timed = flag.Bool("t", false, "Report execution time")
@@ -53,21 +61,30 @@ func main() {
 		close(sizes)
 	}()
 
+	// Check if user has canceled
+	go pollAbort()
+
 	// Sum up sizes sent over the channel from traversing goroutines
 	var totalSize int64
-	for s := range sizes {
-		totalSize += s
-		// fmt.Printf("%s: %s\n", dir, formatFileSize(totalSize))
+loop:
+	for {
+		select {
+		case s, ok := <-sizes:
+			if !ok {
+				break loop
+			}
+			totalSize += s
+		case <-abort:
+			fmt.Println("Canceled.")
+			break loop
+		}
 	}
 	fmt.Printf("Total size: %s\n", formatFileSize(totalSize))
 }
 
-// Limit number of concurrent goroutines
-var n = make(chan struct{}, NUM_GOROUTINES)
-
 // dirSize calculates the size of a directory recursively
 func dirSize(dirName string, wg *sync.WaitGroup, sizes chan<- int64) {
-	n <- struct{}{}
+	n <- nop{}
 	defer func() { <-n }()
 	defer wg.Done()
 	files, err := ioutil.ReadDir(dirName)
@@ -82,6 +99,21 @@ func dirSize(dirName string, wg *sync.WaitGroup, sizes chan<- int64) {
 		}
 	}
 	return
+}
+
+func pollAbort() {
+	os.Stdin.Read(make([]byte, 1))
+	close(abort)
+}
+
+// Helper to check if user has cancelled
+func cancelled() bool {
+	select {
+	case <-abort:
+		return true
+	default:
+		return false
+	}
 }
 
 // formatFileSize parses a size in bytes into an appropriate unit
